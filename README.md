@@ -1,79 +1,32 @@
-# API погодження: SOLID та оптимізація запиту
+# Changes
 
-Тестове на **до 60 хвилин**, включно з перевірками та коротким описом рішень. Це доопрацювання готової заготовки. Після години надішліть поточний результат і зазначте, що залишилося.
+## Practical SOLID
 
-## Що вже є
+SRP: approval business rules and validation order live in `Approval.Api/Workflow/WorkflowService.cs`. Storage state and atomic locking live in `Approval.Api/Workflow/InMemoryApprovalTaskStore.cs`. Snapshot conversion lives in `Approval.Api/Workflow/TaskStateExtensions.cs`. System time is supplied through `TimeProvider`, so the workflow does not read the system clock directly.
 
-- ASP.NET Core API, in-memory workflow, моделі й регресійні тести.
-- Ізольований приклад EF Core + справжня SQLite in-memory: схема, 1000 документів з історією, навмисно неефективний `InboxQuery.ListAsync`, лічильник SQL-команд.
-- SQLite-приклад — окрема вправа на вибірку. Не потрібно переносити workflow у БД, синхронізувати ці два сховища чи додавати новий HTTP-ендпоінт.
+DIP: `WorkflowService` depends on `IApprovalTaskStore` and `TimeProvider`, both injected through its constructor. `Program.cs` registers `TimeProvider.System`, `IApprovalTaskStore`, `InMemoryApprovalTaskStore`, and `WorkflowService`. The workflow dependency tests use a fake store and a controlled time source.
 
-Потрібен **.NET 10 SDK**. Запуск з кореня:
+Concurrency is preserved by running the read-check-write path inside `IApprovalTaskStore.Update`. The current in-memory implementation serializes updates with its `Lock`, so a losing concurrent final action re-reads the already-final state inside the critical section and returns `409` without overwriting the winning result.
 
-```sh
-dotnet restore Approval.slnx
-dotnet run --project Approval.Api --urls http://localhost:5080
-dotnet test Approval.Tests
+## Inbox query optimization
+
+For `ListAsync(db, "user-1", ApprovalStatus.InProgress, page: 1, pageSize: 20)`, the original implementation from commit `b8ea4c1` executed 21 SELECT commands: one query loading documents and one history-count query for each of the 20 page rows. The optimized implementation executes 1 SELECT for the same filters and page size. These counts were measured from the command counter output.
+
+SQL after the change, copied from the command counter output:
+
+```sql
+SELECT "d"."Id", "d"."Number", "d"."Name", "d"."Status", "d"."CreatedAtUtc", (
+    SELECT COUNT(*)
+    FROM "DocumentEvents" AS "d0"
+    WHERE "d"."Id" = "d0"."DocumentId")
+FROM "Documents" AS "d"
+WHERE "d"."AssigneeId" = @assigneeId AND "d"."Status" = @status
+ORDER BY "d"."CreatedAtUtc" DESC, "d"."Id"
+LIMIT @p3 OFFSET @p
 ```
 
-Початкова заготовка має проходити всі активні тести. Один тест оптимізації позначений `Skip` навмисно: поточний метод виконує 21 SELECT для сторінки з 20 рядків. Після оптимізації приберіть `Skip` у `PageUsesOneSelectAndDoesNotLoadPayload`.
+The `Documents` index is `(AssigneeId, Status, CreatedAtUtc DESC, Id)`. `AssigneeId` and `Status` come first because they are equality filters in every inbox query; `CreatedAtUtc DESC` and `Id` match the required ordering and tie-breaker. The tradeoff is extra storage plus index maintenance on inserts and updates to indexed columns, which is acceptable for this read path because every inbox page uses the same filter and sort shape.
 
-## 1. Збережіть API та бізнес-правила
-
-- `POST /api/approval-tasks`: `documentNumber`, `name`, `assigneeId`; `201` і задача з ID, статусом `Assigned`, однаковими датами створення й зміни UTC, порожньою історією.
-- `POST /api/approval-tasks/{id}/actions`: `actorId`, `action` (`Start`, `Approve`, `Reject`), необов'язковий `comment`; після успіху `200` і оновлена задача.
-- `GET /api/approval-tasks/{id}`: `200`, узгоджені поля та історія.
-- Діяти може лише призначений виконавець. Дозволені переходи: `Assigned -> InProgress` через `Start`, `InProgress -> Approved / Rejected`.
-- Для `Reject` потрібен непорожній коментар; після фінального статусу наступні дії заборонені.
-- Успіх атомарно змінює статус, дату та історію; відмова нічого не змінює. За двох конкурентних фінальних дій — один успіх, один `409`, одне фінальне рішення.
-- Порожні обов'язкові поля та відсутня/невідома дія — `400`, відсутня задача — `404`, чужий виконавець — `403`, недозволений перехід — `409`.
-
-Порядок перевірок у заготовці: валідація полів/дії -> наявність задачі -> виконавець -> статус/перехід -> коментар відхилення. Збережіть цей порядок.
-
-## 2. Практичне SOLID
-
-У `WorkflowService` зараз поєднані бізнес-правила, володіння словником та отримання системного часу. Відокремте відповідальність за зберігання; передавайте залежності через DI. Workflow має залежати від абстракції сховища та замінного джерела часу (наприклад, `TimeProvider`).
-
-Додайте поведінковий unit-тест, який виконує workflow з тестовим сховищем і контрольованим часом та перевіряє результат/дати/історію. Форма інтерфейсу — на ваш розсуд; тест має заміняти реальну залежність, а не дублювати алгоритм.
-
-У README коротко поясніть, де у вашому коді проявляються SRP і DIP. Інші принципи застосовуйте лише там, де є реальна потреба. Не потрібно створювати інтерфейс для кожного класу або штучно демонструвати всі п'ять принципів.
-
-## 3. Практична оптимізація запиту
-
-Доопрацюйте `Approval.Api/Queries/InboxQuery.cs`, зберігши сигнатуру, DTO та результат:
-
-- фільтри `AssigneeId` і `Status`, порядок `CreatedAtUtc DESC, Id ASC`, пагінація;
-- поля відповіді: `Id`, `Number`, `Name`, `Status`, `CreatedAtUtc`, `HistoryCount`;
-- сторінка 1-базована; `pageSize` від 1 до 100; порожня сторінка допустима;
-- фільтрація, сортування, пагінація й підрахунок історії виконуються на боці БД;
-- рівно один SELECT для сторінки; не завантажувати `Payload`, повні сутності чи колекції історії; не робити окремий запит для кожного рядка.
-
-Додайте в `ReportDbContext.OnModelCreating` індекс під цю вибірку та коротко обґрунтуйте порядок полів і вартість підтримки індексу. Міграція не потрібна: кожен тест створює нову SQLite-базу через `EnsureCreated`.
-
-Приберіть `Skip` у тесті оптимізації. У README наведіть кількість SELECT до/після та SQL після зміни: доступний через `SqlCommandCounter.Commands` або `ToQueryString()` до матеріалізації. Не потрібні бенчмарки, EXPLAIN, сервер БД чи твердження про гарантоване прискорення в мілісекундах.
-
-## 4. Результат
-
-Надішліть репозиторій або архів. Збережіть регресійні перевірки workflow, додайте тест замінних залежностей і увімкніть SQL-тест. При зміні конструктора оновіть створення сервісу в тестах; вимоги та асерти мають залишитися.
-
-У README: команди запуску, короткі пояснення SOLID та SQL/індексу, відомі обмеження й незавершені частини. У `AI_USAGE.md`: інструмент, суттєві промпти дослівно, що застосували/змінили, як перевірили; або одне речення, що AI не використовували.
-
-Без UI, JWT/ролей, Docker, брокера, зовнішніх сервісів, міграцій і платних залежностей. Зберігайте `actorId` у тілі запиту.
-
-Орієнтир розподілу часу: 5 хв запуск, 25 хв рефакторинг і тест залежностей, 20 хв SQL/індекс, 10 хв перевірка й README. Цей розподіл не є окремими дедлайнами.
-
-## Приклади HTTP-запитів
-
-```http
-POST http://localhost:5080/api/approval-tasks
-Content-Type: application/json
-
-{"documentNumber":"DOC-1","name":"Договір","assigneeId":"user-1"}
-```
-
-```http
-POST http://localhost:5080/api/approval-tasks/{id}/actions
-Content-Type: application/json
-
-{"actorId":"user-1","action":"Start"}
-```
+# Manual changes:
+- Manual changes: codex missed "request is null" check is always false, so i got rid of it. 
+- Changed lock's object type for Lock.

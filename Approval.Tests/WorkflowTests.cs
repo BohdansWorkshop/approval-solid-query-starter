@@ -4,6 +4,8 @@ namespace Approval.Tests;
 
 public sealed class WorkflowTests
 {
+    private static WorkflowService NewWorkflow() => new(new InMemoryApprovalTaskStore(), TimeProvider.System);
+
     private static TaskSnapshot Create(WorkflowService workflow) =>
         workflow.Create(new CreateTaskRequest("DOC-1", "Document", "user-1")).Value!;
 
@@ -17,7 +19,7 @@ public sealed class WorkflowTests
     [Fact]
     public void CreateAssignsInitialStateAndEqualUtcDates()
     {
-        var workflow = new WorkflowService();
+        var workflow = NewWorkflow();
         var task = Create(workflow);
         Assert.NotEqual(Guid.Empty, task.Id);
         Assert.Equal(ApprovalStatus.Assigned, task.Status);
@@ -31,7 +33,7 @@ public sealed class WorkflowTests
     [InlineData("Reject", ApprovalStatus.Rejected)]
     public void FullPathPreservesEarlierSnapshot(string action, ApprovalStatus expected)
     {
-        var workflow = new WorkflowService();
+        var workflow = NewWorkflow();
         var created = Create(workflow);
         var started = workflow.Execute(created.Id, new ActionRequest("user-1", "Start", null));
         var final = workflow.Execute(created.Id, new ActionRequest("user-1", action, " Decision "));
@@ -52,7 +54,7 @@ public sealed class WorkflowTests
     [InlineData("Reject")]
     public void CannotFinalizeBeforeStart(string action)
     {
-        var workflow = new WorkflowService();
+        var workflow = NewWorkflow();
         var task = Create(workflow);
         var result = workflow.Execute(task.Id, new ActionRequest("user-1", action, "Reason"));
         Assert.Equal(409, result.StatusCode);
@@ -62,7 +64,7 @@ public sealed class WorkflowTests
     [Fact]
     public void OtherActorCannotChangeTask()
     {
-        var workflow = new WorkflowService();
+        var workflow = NewWorkflow();
         var task = Create(workflow);
         Assert.Equal(403, workflow.Execute(task.Id, new ActionRequest("user-2", "Start", null)).StatusCode);
         Unchanged(task, workflow.Get(task.Id).Value!);
@@ -74,7 +76,7 @@ public sealed class WorkflowTests
     [InlineData(" ")]
     public void RejectRequiresCommentAndPreservesState(string? comment)
     {
-        var workflow = new WorkflowService();
+        var workflow = NewWorkflow();
         var task = Create(workflow);
         var started = workflow.Execute(task.Id, new ActionRequest("user-1", "Start", null)).Value!;
         Assert.Equal(400, workflow.Execute(task.Id, new ActionRequest("user-1", "Reject", comment)).StatusCode);
@@ -90,7 +92,7 @@ public sealed class WorkflowTests
     [InlineData("Reject", "Reject")]
     public void TerminalStateCannotChange(string terminal, string action)
     {
-        var workflow = new WorkflowService();
+        var workflow = NewWorkflow();
         var task = Create(workflow);
         workflow.Execute(task.Id, new ActionRequest("user-1", "Start", null));
         var final = workflow.Execute(task.Id, new ActionRequest("user-1", terminal, "Reason")).Value!;
@@ -107,7 +109,7 @@ public sealed class WorkflowTests
     [InlineData("Start,Approve")]
     public void UnknownActionCannotChangeTask(string? action)
     {
-        var workflow = new WorkflowService();
+        var workflow = NewWorkflow();
         var task = Create(workflow);
         Assert.Equal(400, workflow.Execute(task.Id, new ActionRequest("user-1", action, null)).StatusCode);
         Unchanged(task, workflow.Get(task.Id).Value!);
@@ -116,7 +118,7 @@ public sealed class WorkflowTests
     [Fact]
     public void MissingTaskReturns404()
     {
-        var workflow = new WorkflowService();
+        var workflow = NewWorkflow();
         Assert.Equal(404, workflow.Get(Guid.NewGuid()).StatusCode);
         Assert.Equal(404, workflow.Execute(Guid.NewGuid(), new ActionRequest("user-1", "Start", null)).StatusCode);
     }
@@ -124,7 +126,7 @@ public sealed class WorkflowTests
     [Fact]
     public async Task TwoConcurrentFinalActionsAllowExactlyOneDecision()
     {
-        var workflow = new WorkflowService();
+        var workflow = NewWorkflow();
         var task = Create(workflow);
         workflow.Execute(task.Id, new ActionRequest("user-1", "Start", null));
         using var barrier = new Barrier(2);

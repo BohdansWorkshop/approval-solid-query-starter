@@ -4,6 +4,8 @@ using Approval.Api.Workflow;
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<IApprovalTaskStore, InMemoryApprovalTaskStore>();
 builder.Services.AddSingleton<WorkflowService>();
 
 var app = builder.Build();

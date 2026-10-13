@@ -8,6 +8,8 @@ public sealed class InboxQueryTests
     [Theory]
     [InlineData(1, 20)]
     [InlineData(2, 5)]
+    [InlineData(5, 10)]
+    [InlineData(6, 10)]
     [InlineData(999, 10)]
     public async Task FilteringOrderingPagingAndHistoryCountAreCorrect(int page, int pageSize)
     {
@@ -42,7 +44,7 @@ public sealed class InboxQueryTests
         Assert.Empty(fixture.Counter.Commands);
     }
 
-    [Fact(Skip = "Candidate: optimize ListAsync, then remove Skip. The supplied version deliberately executes 21 SELECTs.")]
+    [Fact]
     public async Task PageUsesOneSelectAndDoesNotLoadPayload()
     {
         using var fixture = new ReportFixture();

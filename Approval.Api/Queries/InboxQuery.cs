@@ -17,20 +17,19 @@ public sealed class InboxQuery
         if (page < 1 || page > 10000) throw new ArgumentOutOfRangeException(nameof(page));
         if (pageSize < 1 || pageSize > 100) throw new ArgumentOutOfRangeException(nameof(pageSize));
 
-        var allDocuments = await db.Documents.AsNoTracking().ToListAsync(cancellationToken);
-        var pageDocuments = allDocuments
+        return await db.Documents.AsNoTracking()
             .Where(x => x.AssigneeId == assigneeId && x.Status == status)
-            .OrderByDescending(x => x.CreatedAtUtc).ThenBy(x => x.Id)
-            .Skip((page - 1) * pageSize).Take(pageSize).ToList();
-
-        var items = new List<InboxItem>();
-        foreach (var document in pageDocuments)
-        {
-            var historyCount = await db.DocumentEvents.CountAsync(
-                x => x.DocumentId == document.Id, cancellationToken);
-            items.Add(new InboxItem(document.Id, document.Number, document.Name, document.Status,
-                document.CreatedAtUtc, historyCount));
-        }
-        return items;
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .ThenBy(x => x.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(x => new InboxItem(
+                x.Id,
+                x.Number,
+                x.Name,
+                x.Status,
+                x.CreatedAtUtc,
+                x.Events.Count))
+            .ToListAsync(cancellationToken);
     }
 }

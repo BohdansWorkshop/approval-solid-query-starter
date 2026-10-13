@@ -16,10 +16,13 @@ public sealed class ReportDbContext(DbContextOptions<ReportDbContext> options) :
         model.Entity<DocumentRow>().Property(x => x.Name).IsRequired();
         model.Entity<DocumentRow>().Property(x => x.AssigneeId).IsRequired();
         model.Entity<DocumentRow>().Property(x => x.Payload).IsRequired();
+        // The index matches the query’s filter and sort order, so the database can read just the requested page straight from the index, without scanning or sorting
+        model.Entity<DocumentRow>()
+            .HasIndex(x => new { x.AssigneeId, x.Status, x.CreatedAtUtc, x.Id })
+            .IsDescending(false, false, true, false);
         model.Entity<DocumentRow>().HasMany(x => x.Events).WithOne(x => x.Document)
             .HasForeignKey(x => x.DocumentId);
         model.Entity<DocumentEventRow>().HasKey(x => x.Id);
-        // TODO candidate: add and explain an index for the required filter/order.
     }
 }
 
