@@ -28,5 +28,4 @@ LIMIT @p3 OFFSET @p
 The `Documents` index is `(AssigneeId, Status, CreatedAtUtc DESC, Id)`. `AssigneeId` and `Status` come first because they are equality filters in every inbox query; `CreatedAtUtc DESC` and `Id` match the required ordering and tie-breaker. The tradeoff is extra storage plus index maintenance on inserts and updates to indexed columns, which is acceptable for this read path because every inbox page uses the same filter and sort shape.
 
 # Manual changes:
-- Manual changes: codex missed "request is null" check is always false, so i got rid of it. 
 - Changed lock's object type for Lock.

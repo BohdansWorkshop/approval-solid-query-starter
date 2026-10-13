@@ -11,9 +11,10 @@ public sealed class WorkflowService
         _timeProvider = timeProvider;
     }
 
-    public OperationResult<TaskSnapshot> Create(CreateTaskRequest request)
+    public OperationResult<TaskSnapshot> Create(CreateTaskRequest? request)
     {
-        if (string.IsNullOrWhiteSpace(request.DocumentNumber) ||
+        if (request is null ||
+            string.IsNullOrWhiteSpace(request.DocumentNumber) ||
             string.IsNullOrWhiteSpace(request.Name) ||
             string.IsNullOrWhiteSpace(request.AssigneeId))
         {
@@ -43,9 +44,10 @@ public sealed class WorkflowService
             : new(200, task, null);
     }
 
-    public OperationResult<TaskSnapshot> Execute(Guid id, ActionRequest request)
+    public OperationResult<TaskSnapshot> Execute(Guid id, ActionRequest? request)
     {
-        if (string.IsNullOrWhiteSpace(request.ActorId) ||
+        if (request is null ||
+            string.IsNullOrWhiteSpace(request.ActorId) ||
             string.IsNullOrWhiteSpace(request.Action))
         {
             return new(400, null, "ActorId and Action are required.");

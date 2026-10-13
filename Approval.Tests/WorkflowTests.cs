@@ -28,6 +28,13 @@ public sealed class WorkflowTests
         Assert.Empty(task.History);
     }
 
+    [Fact]
+    public void MissingCreateRequestReturns400()
+    {
+        var workflow = NewWorkflow();
+        Assert.Equal(400, workflow.Create(null).StatusCode);
+    }
+
     [Theory]
     [InlineData("Approve", ApprovalStatus.Approved)]
     [InlineData("Reject", ApprovalStatus.Rejected)]
@@ -121,6 +128,83 @@ public sealed class WorkflowTests
         var workflow = NewWorkflow();
         Assert.Equal(404, workflow.Get(Guid.NewGuid()).StatusCode);
         Assert.Equal(404, workflow.Execute(Guid.NewGuid(), new ActionRequest("user-1", "Start", null)).StatusCode);
+    }
+
+    [Fact]
+    public void MissingActionRequestReturns400BeforeTaskLookup()
+    {
+        var workflow = NewWorkflow();
+        Assert.Equal(400, workflow.Execute(Guid.NewGuid(), null).StatusCode);
+    }
+
+    [Fact]
+    public void RejectWithoutCommentFromAssignedReturns409BeforeCommentCheck()
+    {
+        var workflow = NewWorkflow();
+        var task = Create(workflow);
+
+        var result = workflow.Execute(task.Id, new ActionRequest("user-1", "Reject", null));
+
+        Assert.Equal(409, result.StatusCode);
+        Unchanged(task, workflow.Get(task.Id).Value!);
+    }
+
+    [Fact]
+    public void RejectWithoutCommentFromFinalStatusReturns409BeforeCommentCheck()
+    {
+        var workflow = NewWorkflow();
+        var task = Create(workflow);
+        workflow.Execute(task.Id, new ActionRequest("user-1", "Start", null));
+        var approved = workflow.Execute(task.Id, new ActionRequest("user-1", "Approve", null)).Value!;
+
+        var result = workflow.Execute(task.Id, new ActionRequest("user-1", "Reject", null));
+
+        Assert.Equal(409, result.StatusCode);
+        Unchanged(approved, workflow.Get(task.Id).Value!);
+    }
+
+    [Fact]
+    public void RejectWithoutCommentByOtherActorReturns403BeforeCommentCheck()
+    {
+        var workflow = NewWorkflow();
+        var task = Create(workflow);
+
+        var result = workflow.Execute(task.Id, new ActionRequest("user-2", "Reject", null));
+
+        Assert.Equal(403, result.StatusCode);
+        Unchanged(task, workflow.Get(task.Id).Value!);
+    }
+
+    [Fact]
+    public void RejectWithoutCommentForMissingTaskReturns404BeforeCommentCheck()
+    {
+        var workflow = NewWorkflow();
+
+        var result = workflow.Execute(Guid.NewGuid(), new ActionRequest("user-1", "Reject", null));
+
+        Assert.Equal(404, result.StatusCode);
+    }
+
+    [Fact]
+    public void UnknownActionForMissingTaskReturns400BeforeTaskLookup()
+    {
+        var workflow = NewWorkflow();
+
+        var result = workflow.Execute(Guid.NewGuid(), new ActionRequest("user-1", "Unknown", null));
+
+        Assert.Equal(400, result.StatusCode);
+    }
+
+    [Fact]
+    public void OtherActorIllegalTransitionReturns403BeforeTransitionCheck()
+    {
+        var workflow = NewWorkflow();
+        var task = Create(workflow);
+
+        var result = workflow.Execute(task.Id, new ActionRequest("user-2", "Approve", null));
+
+        Assert.Equal(403, result.StatusCode);
+        Unchanged(task, workflow.Get(task.Id).Value!);
     }
 
     [Fact]

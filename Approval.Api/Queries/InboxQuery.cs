@@ -8,7 +8,6 @@ public sealed record InboxItem(long Id, string Number, string Name, ApprovalStat
 
 public sealed class InboxQuery
 {
-    // Working but intentionally inefficient. Optimize this method, preserve its contract.
     public async Task<IReadOnlyList<InboxItem>> ListAsync(ReportDbContext db, string assigneeId,
         ApprovalStatus status, int page = 1, int pageSize = 20, CancellationToken cancellationToken = default)
     {
