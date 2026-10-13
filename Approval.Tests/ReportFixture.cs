@@ -1,4 +1,4 @@
-using Approval.Api.Queries;
+using Approval.Api;
 using Approval.Api.Workflow;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;

@@ -1,7 +1,7 @@
 using Approval.Api.Workflow;
 using Microsoft.EntityFrameworkCore;
 
-namespace Approval.Api.Queries;
+namespace Approval.Api;
 
 // Isolated SQL exercise: these fixtures are not a mirror of the in-memory workflow.
 public sealed class ReportDbContext(DbContextOptions<ReportDbContext> options) : DbContext(options)
